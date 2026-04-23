@@ -50,7 +50,7 @@ mock_mode: true
 real_infer_enabled: false
 mineru_backend: hybrid
 mineru_workdir: null
-infer_command_template: mineru -p "{input_images_dir}" -o "{pred_path}" -b "{mineru_backend}"
+infer_command_template: mineru -p {input_images_dir} -o {pred_path} -b {mineru_backend}
 use_rlaunch_wrapper: true
 infer_conda_init: source ~/.bashrc
 infer_conda_env: vllm-py311
