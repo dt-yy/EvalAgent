@@ -54,9 +54,9 @@ infer_command_template: mineru -p {input_images_dir} -o {pred_path} -b {mineru_b
 use_rlaunch_wrapper: true
 infer_conda_init: source ~/.bashrc
 infer_conda_env: vllm-py311
-rlaunch_memory: 64000
+rlaunch_memory: 32000
 rlaunch_gpu: 1
-rlaunch_cpu: 32
+rlaunch_cpu: 8
 rlaunch_charged_group: mineruinfra_gpu
 rlaunch_namespace: ailab-mineruinfra
 rlaunch_mount_src: gpfs1/mineru2-shared
