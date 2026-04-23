@@ -1,0 +1,19 @@
+token_env: GITHUB_TOKEN
+keywords:
+  - OCR
+  - document parsing
+  - text recognition
+  - layout analysis
+search_window_days: 7
+min_stars: 20
+max_per_keyword: 10
+
+# Fallback when GitHub API is unavailable.
+seed_repos:
+  - model_id: OpenBMB/MiniCPM-o-2_6
+    repo_url: https://github.com/OpenBMB/MiniCPM-o
+    ref: main
+    stars: 20000
+    license_spdx: Apache-2.0
+    summary: OCR and multimodal understanding baseline seed.
+

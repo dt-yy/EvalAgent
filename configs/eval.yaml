@@ -1,0 +1,24 @@
+benchmark: OmniDocBench
+
+# Skill-aligned fixed paths.
+input_images_dir: /mnt/shared-storage-user/mineru2-shared/quyuan/1.6/images
+hpc_output_root: /mnt/shared-storage-user/mineru2-shared/quyuan
+output_root: ./results/predictions
+run_report_dir: ./results/runs
+
+# Retry policy for empty/missing outputs.
+max_retry: 2
+
+# Filter policy.
+min_stars: 20
+enforce_license: false
+allow_licenses:
+  - Apache-2.0
+  - MIT
+  - BSD-3-Clause
+enforce_readme_gate: false
+
+# MVP behavior: generate mock predictions first.
+# Replace runner implementation and set to false for real vLLM+rlaunch.
+mock_mode: true
+

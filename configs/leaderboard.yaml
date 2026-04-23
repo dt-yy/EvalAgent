@@ -1,0 +1,9 @@
+benchmark: OmniDocBench
+leaderboard_dir: ./leaderboard
+results_root: ./results
+sort_by: overall_score
+
+# Optional: official score baselines for score diff.
+official_scores:
+  OpenBMB/MiniCPM-o-2_6: 0.9000
+
