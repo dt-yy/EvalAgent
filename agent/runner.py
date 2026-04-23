@@ -41,17 +41,39 @@ def _escape_single_quotes_for_bash(command: str) -> str:
     return command.replace("'", "'\"'\"'")
 
 
-def _run_shell_command(command: str, cwd: str | None = None) -> tuple[str, str]:
-    completed = subprocess.run(
-        command,
-        shell=True,
-        cwd=cwd,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+def _run_shell_command(command: str, cwd: str | None = None, timeout: int | None = None) -> tuple[str, str]:
+    logger.info("shell command start timeout=%s", timeout)
+    try:
+        completed = subprocess.run(
+            command,
+            shell=True,
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout_partial = exc.stdout or ""
+        stderr_partial = exc.stderr or ""
+        logger.error("shell command timed out after %ss stdout_lines=%d stderr_lines=%d",
+                     timeout, len(stdout_partial.splitlines()), len(stderr_partial.splitlines()))
+        if stdout_partial:
+            logger.error("shell timeout stdout (last 20 lines):\n%s", _tail_text(stdout_partial, 20))
+        if stderr_partial:
+            logger.error("shell timeout stderr (last 20 lines):\n%s", _tail_text(stderr_partial, 20))
+        raise RuntimeError(
+            f"Command timed out after {timeout}s\n"
+            f"command: {command}\n"
+            f"stdout_tail:\n{_tail_text(stdout_partial)}\n"
+            f"stderr_tail:\n{_tail_text(stderr_partial)}"
+        )
     stdout_text = completed.stdout or ""
     stderr_text = completed.stderr or ""
+    if stdout_text:
+        logger.info("shell stdout (last 20 lines):\n%s", _tail_text(stdout_text, 20))
+    if stderr_text:
+        logger.info("shell stderr (last 20 lines):\n%s", _tail_text(stderr_text, 20))
     if completed.returncode != 0:
         raise RuntimeError(
             "Command failed with exit code "
@@ -60,6 +82,7 @@ def _run_shell_command(command: str, cwd: str | None = None) -> tuple[str, str]:
             f"stdout_tail:\n{_tail_text(stdout_text)}\n"
             f"stderr_tail:\n{_tail_text(stderr_text)}"
         )
+    logger.info("shell command done exit_code=0")
     return stdout_text, stderr_text
 
 
@@ -240,6 +263,8 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
     prediction_file_glob = str(config.get("prediction_file_glob", "**/*.md"))
     infer_workdir = config.get("mineru_workdir")
     log_full_command = bool(config.get("log_full_infer_command", True))
+    timeout_min = float(config.get("timeout_min", 60))
+    timeout_sec = timeout_min * 60
     logger.info(
         "runner started %s",
         kv_to_text(
@@ -315,7 +340,7 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
                             "runner command built %s",
                             kv_to_text(job_id=job.job_id, attempt=attempts, command_hidden=True),
                         )
-                    stdout_text, stderr_text = _run_shell_command(command=command, cwd=infer_workdir)
+                    stdout_text, stderr_text = _run_shell_command(command=command, cwd=infer_workdir, timeout=timeout_sec)
                     if stdout_text:
                         job.notes.append("infer_stdout_captured")
                     if stderr_text:
