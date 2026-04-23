@@ -62,11 +62,12 @@ rlaunch_namespace: ailab-mineruinfra
 rlaunch_mount_src: gpfs1/mineru2-shared
 rlaunch_mount_dst: /mnt/shared-storage-user/mineru2-shared
 rlaunch_command_template: >-
-  rlaunch --memory={rlaunch_memory} --gpu={rlaunch_gpu} --cpu={rlaunch_cpu}
-  --charged-group={rlaunch_charged_group} --private-machine=yes
+  rjob submit --memory={rlaunch_memory} --gpu={rlaunch_gpu} --cpu={rlaunch_cpu}
+  --charged-group={rlaunch_charged_group} --private-machine=group
   --namespace={rlaunch_namespace}
   --mount=gpfs://{rlaunch_mount_src}:{rlaunch_mount_dst}
-  -- bash -lc '{inner_infer_command_escaped}'
+  --enable-sshd --host-network=true -e DISTRIBUTED_JOB=true
+  -- bash -exc '{inner_infer_command_escaped}'
 prediction_file_glob: "**/*.md"
 log_full_infer_command: true
 timeout_min: 60
