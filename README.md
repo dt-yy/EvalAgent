@@ -1,6 +1,6 @@
 # OCR Leaderboard Agent
 
-一个用于**自动发现 GitHub 新 OCR 模型**并**自动更新评测榜单**的 Agent 项目模板。
+一个用于**自动发现 GitHub 新 OCR 模型**并**自动更新评测榜单**的 Agent 项目。
 
 ## 1. 项目目标
 
