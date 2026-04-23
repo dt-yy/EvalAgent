@@ -68,8 +68,7 @@ rlaunch_command_template: >-
   --mount=gpfs://{rlaunch_mount_src}:{rlaunch_mount_dst}
   -- bash -lc '{inner_infer_command_escaped}'
 prediction_file_glob: "**/*.md"
-log_full_infer_command: true
-timeout_min: 60
+log_full_infer_command: false
 model_output_dir_map:
   opendatalab/mineru: mineru
 

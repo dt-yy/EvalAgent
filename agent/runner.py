@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -42,68 +41,21 @@ def _escape_single_quotes_for_bash(command: str) -> str:
     return command.replace("'", "'\"'\"'")
 
 
-def _stream_reader(stream, lines: list[str], logger_func=None) -> None:
-    """Read lines from a stream in a background thread, optionally logging each line."""
-    for raw_line in stream:
-        line = raw_line.rstrip("\n")
-        lines.append(line)
-        if logger_func:
-            logger_func(line)
-
-
-def _run_shell_command(
-    command: str,
-    cwd: str | None = None,
-    timeout: float | None = None,
-) -> tuple[str, str]:
-    process = subprocess.Popen(
+def _run_shell_command(command: str, cwd: str | None = None) -> tuple[str, str]:
+    completed = subprocess.run(
         command,
         shell=True,
         cwd=cwd,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
+        check=False,
     )
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
-
-    stdout_thread = threading.Thread(
-        target=_stream_reader,
-        args=(process.stdout, stdout_lines, lambda line: logger.info("infer stdout | %s", line)),
-        daemon=True,
-    )
-    stderr_thread = threading.Thread(
-        target=_stream_reader,
-        args=(process.stderr, stderr_lines, lambda line: logger.info("infer stderr | %s", line)),
-        daemon=True,
-    )
-    stdout_thread.start()
-    stderr_thread.start()
-
-    try:
-        returncode = process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
-        stdout_thread.join(timeout=5)
-        stderr_thread.join(timeout=5)
-        raise RuntimeError(
-            f"Command timed out after {timeout}s\n"
-            f"command: {command}\n"
-            f"stdout_tail:\n{_tail_text('\n'.join(stdout_lines))}\n"
-            f"stderr_tail:\n{_tail_text('\n'.join(stderr_lines))}"
-        )
-
-    stdout_thread.join(timeout=5)
-    stderr_thread.join(timeout=5)
-
-    stdout_text = "\n".join(stdout_lines)
-    stderr_text = "\n".join(stderr_lines)
-
-    if returncode != 0:
+    stdout_text = completed.stdout or ""
+    stderr_text = completed.stderr or ""
+    if completed.returncode != 0:
         raise RuntimeError(
             "Command failed with exit code "
-            f"{returncode}\n"
+            f"{completed.returncode}\n"
             f"command: {command}\n"
             f"stdout_tail:\n{_tail_text(stdout_text)}\n"
             f"stderr_tail:\n{_tail_text(stderr_text)}"
@@ -288,9 +240,6 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
     prediction_file_glob = str(config.get("prediction_file_glob", "**/*.md"))
     infer_workdir = config.get("mineru_workdir")
     log_full_command = bool(config.get("log_full_infer_command", True))
-    # Timeout in seconds; config uses timeout_min (minutes), default 60.
-    timeout_min = float(config.get("timeout_min", 60))
-    timeout_sec = timeout_min * 60
     logger.info(
         "runner started %s",
         kv_to_text(
@@ -366,9 +315,7 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
                             "runner command built %s",
                             kv_to_text(job_id=job.job_id, attempt=attempts, command_hidden=True),
                         )
-                    stdout_text, stderr_text = _run_shell_command(
-                        command=command, cwd=infer_workdir, timeout=timeout_sec
-                    )
+                    stdout_text, stderr_text = _run_shell_command(command=command, cwd=infer_workdir)
                     if stdout_text:
                         job.notes.append("infer_stdout_captured")
                     if stderr_text:
