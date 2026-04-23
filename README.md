@@ -245,6 +245,38 @@ python scripts/run_once.py --config-dir configs
 
 如果你在某次实验想临时放宽规则，建议只改对应配置，不改代码逻辑。
 
+## 13.1 可选 AI 决策层（新增）
+
+当前仓库已支持在 `filter` 阶段使用 LLM 做仓库分流（OpenAI 兼容接口）：
+
+- 判断是否 OCR 相关；
+- 判断是否具备可执行性；
+- 给出是否建议进入评测队列与理由。
+
+默认关闭。开启方式（`configs/eval.yaml`）：
+
+- `ai_repo_filter_enabled: true`
+- 配置 `ai_base_url`、`ai_model`、`ai_api_key_env`
+- 在运行环境中设置 `OPENAI_API_KEY`（或你指定的环境变量）
+
+如果 AI 不可用（无 key/超时/接口失败），会自动回退到规则逻辑，不影响主流程可用性。
+
+## 13.2 可选 AI 推理命令规划（README 驱动）
+
+当前仓库支持在 `runner` 阶段使用 LLM 读取 GitHub README，并给出更优的推理命令模板与 backend 建议。
+
+默认关闭。开启方式（`configs/eval.yaml`）：
+
+- `ai_infer_planner_enabled: true`
+- `ai_infer_planner_min_confidence: 0.75`（建议先保守）
+- `ai_infer_readme_max_chars: 12000`
+
+行为说明：
+
+- 仅在 `real_infer_enabled: true` 时生效；
+- AI 建议必须包含 `{input_images_dir}` 与 `{pred_path}` 才会被采纳；
+- 若置信度不足或接口失败，会继续使用 `infer_command_template` 默认值。
+
 ## 14. 跳过发现模块：以 MinerU 真实跑 OmniDocBench
 
 当你希望先做“单模型部署 + 真实评测”而不是自动发现时，使用：
@@ -291,6 +323,14 @@ python scripts/run_mineru_omnidocbench.py --config-dir configs --with-setup --re
 - `infer_conda_env`（默认 `vllm-py311`）
 
 如果要临时绕过 rlaunch 在当前机直接跑，把 `use_rlaunch_wrapper` 改为 `false`。
+
+### 14.5 关键日志（新增）
+
+关键模块已加入结构化日志：`discovery / filter / runner / evaluator / updater / orchestrator`。
+
+- 全局日志级别通过环境变量 `LOG_LEVEL` 控制（默认 `INFO`）。
+- 推理命令默认不完整打印：`log_full_infer_command: false`。
+- 若排障需要完整命令，将 `log_full_infer_command` 改为 `true`。
 
 ### 14.3 产物位置
 

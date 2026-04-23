@@ -8,9 +8,12 @@ from typing import Any
 from .discovery import discover_candidates
 from .evaluator import evaluate_jobs
 from .filter import filter_candidates
+from .logging_utils import get_logger, kv_to_text
 from .runner import run_jobs
 from .types import to_dict
 from .updater import update_leaderboard
+
+logger = get_logger(__name__)
 
 
 def _write_run_report(report_dir: str | Path, report: dict[str, Any]) -> str:
@@ -26,13 +29,29 @@ def run_pipeline(configs: dict[str, dict[str, Any]]) -> dict[str, Any]:
     discovery_cfg = configs.get("discovery", {})
     eval_cfg = configs.get("evaluation", {})
     leaderboard_cfg = configs.get("leaderboard", {})
+    logger.info("orchestrator started")
 
     candidates = discover_candidates(discovery_cfg)
+    logger.info("orchestrator stage done %s", kv_to_text(stage="discovery", candidates=len(candidates)))
     jobs = filter_candidates(candidates=candidates, config=eval_cfg)
     jobs_ready_before_run = sum(1 for j in jobs if j.status == "ready")
+    logger.info(
+        "orchestrator stage done %s",
+        kv_to_text(stage="filter", jobs_total=len(jobs), jobs_ready_before_run=jobs_ready_before_run),
+    )
     jobs = run_jobs(jobs=jobs, config=eval_cfg)
+    logger.info(
+        "orchestrator stage done %s",
+        kv_to_text(
+            stage="runner",
+            jobs_success=sum(1 for j in jobs if j.status == "success"),
+            jobs_failed=sum(1 for j in jobs if j.status == "failed"),
+        ),
+    )
     results = evaluate_jobs(jobs=jobs, config={**leaderboard_cfg, **eval_cfg})
+    logger.info("orchestrator stage done %s", kv_to_text(stage="evaluator", results=len(results)))
     leaderboard_output = update_leaderboard(results=results, config=leaderboard_cfg)
+    logger.info("orchestrator stage done %s", kv_to_text(stage="updater", entries=leaderboard_output["entries"]))
 
     report = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -53,5 +72,14 @@ def run_pipeline(configs: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
     report_file = _write_run_report(eval_cfg.get("run_report_dir", "./results/runs"), report)
     report["run_report_file"] = report_file
+    logger.info(
+        "orchestrator finished %s",
+        kv_to_text(
+            report_file=report_file,
+            jobs_success=report["counts"]["jobs_success"],
+            jobs_failed=report["counts"]["jobs_failed"],
+            results=report["counts"]["results"],
+        ),
+    )
     return report
 

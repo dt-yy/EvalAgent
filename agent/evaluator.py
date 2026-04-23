@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .logging_utils import get_logger, kv_to_text
 from .types import EvalJob, EvalResult
+
+logger = get_logger(__name__)
 
 
 def _stable_score_seed(model_id: str) -> int:
@@ -164,6 +167,10 @@ def _evaluate_job_with_omnidocbench(job: EvalJob, config: dict[str, Any]) -> tup
         )
     )
     command = command_template.format(python_bin=python_bin, config_path=str(generated_cfg_path))
+    logger.info(
+        "evaluator run omnidocbench %s",
+        kv_to_text(job_id=job.job_id, model_id=job.model_id, config_path=generated_cfg_path),
+    )
     _run_shell_command(command=command, cwd=str(repo_dir))
 
     metric_result_path = Path(
@@ -177,6 +184,10 @@ def _evaluate_job_with_omnidocbench(job: EvalJob, config: dict[str, Any]) -> tup
     if not metric_result_path.exists():
         raise FileNotFoundError(f"OmniDocBench metric result not found: {metric_result_path}")
     metrics = _parse_omnidocbench_metric_result(metric_result_path)
+    logger.info(
+        "evaluator metric parsed %s",
+        kv_to_text(model_id=job.model_id, overall_score=metrics.get("overall_score"), metric_path=metric_result_path),
+    )
     return metrics, str(metric_result_path)
 
 
@@ -186,11 +197,19 @@ def evaluate_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalResul
     results_root = Path(config.get("results_root", "./results")).resolve()
     run_id = datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
     real_eval_enabled = bool(config.get("real_eval_enabled", False))
+    logger.info(
+        "evaluator started %s",
+        kv_to_text(jobs_total=len(jobs), real_eval_enabled=real_eval_enabled, run_id=run_id),
+    )
 
     results: list[EvalResult] = []
     for job in jobs:
         if job.status != "success" or not job.pred_path:
             continue
+        logger.info(
+            "evaluator job started %s",
+            kv_to_text(job_id=job.job_id, model_id=job.model_id, pred_path=job.pred_path),
+        )
 
         if real_eval_enabled:
             metrics, metric_result_path = _evaluate_job_with_omnidocbench(job=job, config=config)
@@ -246,6 +265,16 @@ def evaluate_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalResul
             ),
             encoding="utf-8",
         )
+        logger.info(
+            "evaluator job finished %s",
+            kv_to_text(
+                job_id=job.job_id,
+                model_id=job.model_id,
+                overall_score=overall_score,
+                result_file=target_file,
+            ),
+        )
 
+    logger.info("evaluator finished %s", kv_to_text(results=len(results), run_id=run_id))
     return results
 

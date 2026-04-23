@@ -7,7 +7,10 @@ from typing import Any
 from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
 
+from .logging_utils import get_logger, kv_to_text
 from .types import CandidateRecord
+
+logger = get_logger(__name__)
 
 
 def _github_search(query: str, token: str | None, per_page: int) -> list[dict[str, Any]]:
@@ -31,6 +34,16 @@ def discover_candidates(config: dict[str, Any]) -> list[CandidateRecord]:
     min_stars: int = int(config.get("min_stars", 0))
     per_keyword: int = int(config.get("max_per_keyword", 10))
     days_back: int = int(config.get("search_window_days", 7))
+    logger.info(
+        "discovery started %s",
+        kv_to_text(
+            keywords=len(keywords),
+            min_stars=min_stars,
+            per_keyword=per_keyword,
+            days_back=days_back,
+            has_token=bool(token),
+        ),
+    )
 
     dedup: dict[str, CandidateRecord] = {}
     pushed_after = (datetime.now(timezone.utc) - timedelta(days=days_back)).date().isoformat()
@@ -38,9 +51,11 @@ def discover_candidates(config: dict[str, Any]) -> list[CandidateRecord]:
         query = f"{keyword} stars:>={min_stars} pushed:>={pushed_after}"
         try:
             items = _github_search(query=query, token=token, per_page=per_keyword)
-        except Exception:
+        except Exception as exc:
+            logger.warning("discovery keyword failed %s", kv_to_text(keyword=keyword, error=type(exc).__name__))
             continue
 
+        logger.info("discovery keyword result %s", kv_to_text(keyword=keyword, count=len(items)))
         for item in items:
             full_name = item.get("full_name")
             if not full_name or full_name in dedup:
@@ -61,6 +76,7 @@ def discover_candidates(config: dict[str, Any]) -> list[CandidateRecord]:
             dedup[full_name] = record
 
     if dedup:
+        logger.info("discovery finished via github %s", kv_to_text(candidates=len(dedup)))
         return list(dedup.values())
 
     # Fallback seed so the MVP pipeline can run locally.
@@ -84,5 +100,6 @@ def discover_candidates(config: dict[str, Any]) -> list[CandidateRecord]:
                 summary=seed.get("summary", "seed candidate"),
             )
         )
+    logger.info("discovery fallback seeds used %s", kv_to_text(candidates=len(records)))
     return records
 

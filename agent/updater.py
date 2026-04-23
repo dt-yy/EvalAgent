@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .logging_utils import get_logger, kv_to_text
 from .types import EvalResult
+
+logger = get_logger(__name__)
 
 
 def _load_existing_entries(path: Path) -> list[dict[str, Any]]:
@@ -28,6 +31,10 @@ def update_leaderboard(
     sort_by = config.get("sort_by", "overall_score")
     json_path = leaderboard_dir / "leaderboard.json"
     md_path = leaderboard_dir / "leaderboard.md"
+    logger.info(
+        "updater started %s",
+        kv_to_text(new_results=len(results), leaderboard_dir=leaderboard_dir, sort_by=sort_by),
+    )
 
     leaderboard_dir.mkdir(parents=True, exist_ok=True)
     by_model: dict[str, dict[str, Any]] = {}
@@ -106,6 +113,10 @@ def update_leaderboard(
             )
         )
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    logger.info(
+        "updater finished %s",
+        kv_to_text(entries=len(ranked_entries), leaderboard_json=json_path, leaderboard_md=md_path),
+    )
 
     return {"leaderboard_json": str(json_path), "leaderboard_md": str(md_path), "entries": len(ranked_entries)}
 

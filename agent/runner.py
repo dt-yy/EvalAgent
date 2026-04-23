@@ -7,7 +7,11 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 
+from .ai_client import suggest_infer_command_with_ai
+from .logging_utils import get_logger, kv_to_text
 from .types import EvalJob
+
+logger = get_logger(__name__)
 
 
 DEFAULT_SHARED_MOUNT_PREFIX = "/mnt/shared-storage-user/mineru2-shared"
@@ -179,6 +183,45 @@ def _build_real_infer_command(
     )
 
 
+def _resolve_ai_infer_overrides(
+    *,
+    job: EvalJob,
+    config: dict[str, Any],
+    input_images_dir: str,
+    pred_path: str,
+) -> tuple[str | None, str | None, list[str]]:
+    notes: list[str] = []
+    ai_plan = suggest_infer_command_with_ai(
+        repo_url=job.repo_url,
+        ref=job.ref,
+        model_id=job.model_id,
+        current_template=str(config.get("infer_command_template", "")),
+        current_backend=str(config.get("mineru_backend", "pipeline")),
+        input_images_dir=input_images_dir,
+        pred_path=pred_path,
+        config=config,
+    )
+    if ai_plan is None:
+        return None, None, notes
+
+    confidence = float(ai_plan.get("confidence", 0.0))
+    notes.append(f"ai_infer_confidence={confidence:.2f}")
+    reason = str(ai_plan.get("reason", ""))
+    if reason:
+        notes.append(f"ai_infer_reason={reason}")
+
+    min_conf = float(config.get("ai_infer_planner_min_confidence", 0.75))
+    if confidence < min_conf:
+        notes.append("ai_infer_below_threshold")
+        return None, None, notes
+
+    return (
+        str(ai_plan.get("infer_command_template", "")).strip() or None,
+        str(ai_plan.get("mineru_backend", "")).strip() or None,
+        notes,
+    )
+
+
 def _has_prediction_outputs(pred_dir: Path, file_glob: str) -> bool:
     return any(pred_dir.glob(file_glob))
 
@@ -196,6 +239,17 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
     max_retry, retry_note = _enforce_skill_policy(config=config, mock_mode=mock_mode)
     prediction_file_glob = str(config.get("prediction_file_glob", "**/*.md"))
     infer_workdir = config.get("mineru_workdir")
+    log_full_command = bool(config.get("log_full_infer_command", True))
+    logger.info(
+        "runner started %s",
+        kv_to_text(
+            jobs_total=len(jobs),
+            mock_mode=mock_mode,
+            real_infer_enabled=real_infer_enabled,
+            max_retry=max_retry,
+            prediction_file_glob=prediction_file_glob,
+        ),
+    )
 
     for job in jobs:
         if job.status != "ready":
@@ -209,6 +263,25 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
             model_dir_path.mkdir(parents=True, exist_ok=True)
         pred_file = model_dir_path / "predictions.jsonl"
         run_meta_file = model_dir_path / "run_meta.json"
+        ai_template: str | None = None
+        ai_backend: str | None = None
+        ai_notes: list[str] = []
+        logger.info(
+            "runner job started %s",
+            kv_to_text(job_id=job.job_id, model_id=job.model_id, pred_path=model_dir),
+        )
+        if not mock_mode:
+            ai_template, ai_backend, ai_notes = _resolve_ai_infer_overrides(
+                job=job,
+                config=config,
+                input_images_dir=input_images_dir,
+                pred_path=model_dir,
+            )
+            job.notes.extend(ai_notes)
+            if ai_template:
+                job.notes.append("ai_infer_template_applied")
+            if ai_backend:
+                job.notes.append(f"ai_backend_applied={ai_backend}")
 
         attempts = 0
         job.status = "running"
@@ -220,12 +293,28 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
                 if mock_mode:
                     _write_mock_prediction(pred_file=pred_file, input_dir=input_images_dir, model_id=job.model_id)
                 else:
+                    runtime_config = dict(config)
+                    if ai_template:
+                        runtime_config["infer_command_template"] = ai_template
+                    if ai_backend:
+                        runtime_config["mineru_backend"] = ai_backend
+
                     command = _build_real_infer_command(
-                        config=config,
+                        config=runtime_config,
                         input_images_dir=input_images_dir,
                         pred_path=model_dir,
                         model_id=job.model_id,
                     )
+                    if log_full_command:
+                        logger.info(
+                            "runner command %s",
+                            kv_to_text(job_id=job.job_id, attempt=attempts, command=command),
+                        )
+                    else:
+                        logger.info(
+                            "runner command built %s",
+                            kv_to_text(job_id=job.job_id, attempt=attempts, command_hidden=True),
+                        )
                     stdout_text, stderr_text = _run_shell_command(command=command, cwd=infer_workdir)
                     if stdout_text:
                         job.notes.append("infer_stdout_captured")
@@ -245,8 +334,16 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
                     break
 
                 job.error = "empty_output"
+                logger.warning(
+                    "runner empty output %s",
+                    kv_to_text(job_id=job.job_id, attempt=attempts, pred_path=model_dir),
+                )
             except (OSError, RuntimeError, ValueError) as exc:
                 job.error = str(exc)
+                logger.warning(
+                    "runner attempt failed %s",
+                    kv_to_text(job_id=job.job_id, attempt=attempts, error=type(exc).__name__),
+                )
 
             if attempts > max_retry:
                 job.status = "failed"
@@ -262,6 +359,24 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         run_meta_file.write_text(json.dumps(run_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.info(
+            "runner job finished %s",
+            kv_to_text(
+                job_id=job.job_id,
+                model_id=job.model_id,
+                status=job.status,
+                retry_count=job.retry_count,
+                pred_path=job.pred_path,
+            ),
+        )
 
+    logger.info(
+        "runner finished %s",
+        kv_to_text(
+            success=sum(1 for j in jobs if j.status == "success"),
+            failed=sum(1 for j in jobs if j.status == "failed"),
+            running=sum(1 for j in jobs if j.status == "running"),
+        ),
+    )
     return jobs
 

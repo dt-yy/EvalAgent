@@ -14,9 +14,12 @@ if str(ROOT) not in sys.path:
 
 from agent.config import load_all_configs
 from agent.evaluator import evaluate_jobs
+from agent.logging_utils import configure_logging, get_logger
 from agent.runner import run_jobs
 from agent.types import EvalJob, to_dict
 from agent.updater import update_leaderboard
+
+logger = get_logger(__name__)
 
 
 def _normalize_repo_key(value: str) -> str:
@@ -24,18 +27,22 @@ def _normalize_repo_key(value: str) -> str:
 
 
 def _run_command(command: str, cwd: str | None = None) -> None:
+    logger.info("setup command start cwd=%s command=%s", cwd, command)
     completed = subprocess.run(command, shell=True, cwd=cwd, text=True, check=False)
     if completed.returncode != 0:
         raise RuntimeError(f"Command failed({completed.returncode}): {command}")
+    logger.info("setup command done cwd=%s", cwd)
 
 
 def _ensure_repo(repo_url: str, repo_dir: Path, auto_pull: bool) -> None:
     if repo_dir.exists():
         if auto_pull:
             _run_command("git pull", cwd=str(repo_dir))
+            logger.info("repo updated path=%s", repo_dir)
         return
     repo_dir.parent.mkdir(parents=True, exist_ok=True)
     _run_command(f'git clone "{repo_url}" "{repo_dir}"')
+    logger.info("repo cloned path=%s", repo_dir)
 
 
 def _run_setup(eval_cfg: dict[str, Any]) -> None:
@@ -83,6 +90,7 @@ def _write_run_report(report_dir: str | Path, report: dict[str, Any]) -> str:
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(description="Run MinerU on OmniDocBench without discovery module.")
     parser.add_argument("--config-dir", default="configs")
     parser.add_argument("--model-id", default="opendatalab/mineru")
@@ -100,6 +108,13 @@ def main() -> None:
         help="Exit with non-zero code when any job fails.",
     )
     args = parser.parse_args()
+    logger.info(
+        "run_mineru script started config_dir=%s model_id=%s real=%s with_setup=%s",
+        args.config_dir,
+        args.model_id,
+        args.real,
+        args.with_setup,
+    )
 
     configs = load_all_configs(args.config_dir)
     eval_cfg = configs.get("evaluation", {})
@@ -127,6 +142,12 @@ def main() -> None:
     jobs = run_jobs(jobs=jobs, config=eval_cfg)
     results = evaluate_jobs(jobs=jobs, config={**leaderboard_cfg, **eval_cfg})
     leaderboard_output = update_leaderboard(results=results, config=leaderboard_cfg)
+    logger.info(
+        "run_mineru script stages done jobs_success=%s jobs_failed=%s results=%s",
+        sum(1 for j in jobs if j.status == "success"),
+        sum(1 for j in jobs if j.status == "failed"),
+        len(results),
+    )
 
     report = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -146,6 +167,7 @@ def main() -> None:
     print(f"run_report_file={report_path}")
     print(f"leaderboard_json={leaderboard_output['leaderboard_json']}")
     print(f"leaderboard_md={leaderboard_output['leaderboard_md']}")
+    logger.info("run_mineru script finished report=%s", report_path)
 
     if args.fail_on_job_failure and report["counts"]["jobs_failed"] > 0:
         raise SystemExit(1)

@@ -28,6 +28,20 @@ readme_verified_repos:
   - opendatalab/mineru
   - https://github.com/opendatalab/mineru
 
+# Optional AI triage in filter stage (OpenAI-compatible API).
+ai_repo_filter_enabled: false
+ai_base_url: https://api.openai.com/v1
+ai_model: gpt-4o-mini
+ai_api_key_env: OPENAI_API_KEY
+ai_timeout_sec: 30
+ai_repo_filter_min_confidence: 0.65
+ai_repo_filter_hard_skip: false
+
+# Optional AI command planner: read README then suggest infer command.
+ai_infer_planner_enabled: false
+ai_infer_planner_min_confidence: 0.75
+ai_infer_readme_max_chars: 12000
+
 # MVP behavior: generate mock predictions first.
 # Set to false when running real MinerU inference.
 mock_mode: true
@@ -54,6 +68,7 @@ rlaunch_command_template: >-
   --mount=gpfs://{rlaunch_mount_src}:{rlaunch_mount_dst}
   -- bash -lc '{inner_infer_command_escaped}'
 prediction_file_glob: "**/*.md"
+log_full_infer_command: false
 model_output_dir_map:
   opendatalab/mineru: mineru
 
