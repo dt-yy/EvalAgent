@@ -284,8 +284,7 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
 
         model_dir = _resolve_prediction_dir(job=job, config=config, mock_mode=mock_mode)
         model_dir_path = Path(model_dir)
-        if mock_mode:
-            model_dir_path.mkdir(parents=True, exist_ok=True)
+        model_dir_path.mkdir(parents=True, exist_ok=True)
         pred_file = model_dir_path / "predictions.jsonl"
         run_meta_file = model_dir_path / "run_meta.json"
         ai_template: str | None = None
