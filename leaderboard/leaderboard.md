@@ -5,4 +5,3 @@
 
 | Rank | Model | Score | CER | F1 | Diff vs Official | Repo |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-

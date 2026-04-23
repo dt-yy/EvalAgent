@@ -233,3 +233,14 @@ python scripts/run_once.py --config-dir configs
 - 榜单 Markdown：`leaderboard/leaderboard.md`
 
 > 当前默认 `mock_mode=true`，用于先打通全链路。接入真实 vLLM + rlaunch 时，将 `agent/runner.py` 的执行逻辑替换为真实命令并把 `configs/eval.yaml` 中 `mock_mode` 改为 `false`。
+
+## 13. Skill 规则已固化为 Agent 策略
+
+`configs/eval.yaml` 已内置以下硬约束：
+
+- `enforce_readme_gate: true`：只有 `readme_verified_repos` 中确认过 README 的仓库才会进入 `ready`。
+- `enforce_shared_mount_paths: true`：强制 `input_images_dir` 和 `hpc_output_root` 落在共享挂载前缀下。
+- `require_offline_compute_node: true` + `allow_network_on_compute_node: false`：默认按离线计算节点策略执行。
+- `max_retry_hard_cap: 2`：即使误配更大值，也会被 runner 自动夹到 2。
+
+如果你在某次实验想临时放宽规则，建议只改对应配置，不改代码逻辑。

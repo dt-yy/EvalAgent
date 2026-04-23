@@ -6,8 +6,15 @@ hpc_output_root: /mnt/shared-storage-user/mineru2-shared/quyuan
 output_root: ./results/predictions
 run_report_dir: ./results/runs
 
+# Skill policy guards.
+shared_mount_prefix: /mnt/shared-storage-user/mineru2-shared
+enforce_shared_mount_paths: true
+require_offline_compute_node: true
+allow_network_on_compute_node: false
+
 # Retry policy for empty/missing outputs.
 max_retry: 2
+max_retry_hard_cap: 2
 
 # Filter policy.
 min_stars: 20
@@ -16,7 +23,10 @@ allow_licenses:
   - Apache-2.0
   - MIT
   - BSD-3-Clause
-enforce_readme_gate: false
+enforce_readme_gate: true
+readme_verified_repos:
+  - openbmb/minicpm-o
+  - https://github.com/openbmb/minicpm-o
 
 # MVP behavior: generate mock predictions first.
 # Replace runner implementation and set to false for real vLLM+rlaunch.

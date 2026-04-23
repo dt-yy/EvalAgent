@@ -11,6 +11,21 @@ def _is_likely_ocr_candidate(candidate: CandidateRecord) -> bool:
     return any(k in text for k in keywords)
 
 
+def _normalize_repo_key(value: str) -> str:
+    return value.strip().lower().rstrip("/")
+
+
+def _is_readme_verified(candidate: CandidateRecord, verified_repo_keys: set[str]) -> bool:
+    repo_id_key = _normalize_repo_key(candidate.repo_id)
+    owner_name_key = _normalize_repo_key(f"{candidate.owner}/{candidate.name}")
+    repo_url_key = _normalize_repo_key(candidate.repo_url)
+    return (
+        repo_id_key in verified_repo_keys
+        or owner_name_key in verified_repo_keys
+        or repo_url_key in verified_repo_keys
+    )
+
+
 def filter_candidates(
     candidates: list[CandidateRecord],
     config: dict[str, Any],
@@ -19,6 +34,11 @@ def filter_candidates(
     enforce_license = bool(config.get("enforce_license", False))
     min_stars = int(config.get("min_stars", 0))
     enforce_readme_gate = bool(config.get("enforce_readme_gate", False))
+    verified_repo_keys = {
+        _normalize_repo_key(item)
+        for item in config.get("readme_verified_repos", [])
+        if isinstance(item, str)
+    }
 
     jobs: list[EvalJob] = []
     for idx, candidate in enumerate(candidates, start=1):
@@ -40,8 +60,9 @@ def filter_candidates(
 
         # Skill constraint: ideally read README before install/infer.
         if status == "ready" and enforce_readme_gate:
-            status = "need_manual"
-            notes.append("readme_not_confirmed")
+            if not _is_readme_verified(candidate=candidate, verified_repo_keys=verified_repo_keys):
+                status = "need_manual"
+                notes.append("readme_not_confirmed")
 
         model_id = f"{candidate.owner}/{candidate.name}".strip("/")
         jobs.append(
