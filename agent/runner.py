@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 from .types import EvalJob
@@ -22,6 +24,39 @@ def _write_mock_prediction(pred_file: Path, input_dir: str, model_id: str) -> No
         "text": "mock prediction for MVP",
     }
     pred_file.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _tail_text(content: str, max_lines: int = 40) -> str:
+    lines = content.strip().splitlines()
+    if len(lines) <= max_lines:
+        return "\n".join(lines)
+    return "\n".join(lines[-max_lines:])
+
+
+def _escape_single_quotes_for_bash(command: str) -> str:
+    return command.replace("'", "'\"'\"'")
+
+
+def _run_shell_command(command: str, cwd: str | None = None) -> tuple[str, str]:
+    completed = subprocess.run(
+        command,
+        shell=True,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    stdout_text = completed.stdout or ""
+    stderr_text = completed.stderr or ""
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Command failed with exit code "
+            f"{completed.returncode}\n"
+            f"command: {command}\n"
+            f"stdout_tail:\n{_tail_text(stdout_text)}\n"
+            f"stderr_tail:\n{_tail_text(stderr_text)}"
+        )
+    return stdout_text, stderr_text
 
 
 def _normalize_path_text(path_value: str) -> str:
@@ -75,16 +110,92 @@ def _enforce_skill_policy(config: dict[str, Any], mock_mode: bool) -> tuple[int,
     return max_retry, retry_note
 
 
+def _resolve_prediction_dir(job: EvalJob, config: dict[str, Any], mock_mode: bool) -> str:
+    model_dir_name_map = config.get("model_output_dir_map", {})
+    model_dir_name = model_dir_name_map.get(job.model_id, _safe_model_dir(job.model_id))
+
+    if mock_mode:
+        output_root = Path(config.get("output_root", "./results/predictions")).resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+        return str(output_root / model_dir_name)
+
+    hpc_output_root = str(config.get("hpc_output_root", DEFAULT_SHARED_MOUNT_PREFIX + "/quyuan"))
+    normalized_root = hpc_output_root.strip()
+    if normalized_root.startswith("/"):
+        return str(PurePosixPath(normalized_root) / model_dir_name)
+    return str(Path(normalized_root) / model_dir_name)
+
+
+def _build_real_infer_command(
+    *,
+    config: dict[str, Any],
+    input_images_dir: str,
+    pred_path: str,
+    model_id: str,
+) -> str:
+    template = str(
+        config.get(
+            "infer_command_template",
+            'mineru -p "{input_images_dir}" -o "{pred_path}" -b "{mineru_backend}"',
+        )
+    )
+    inner_command = template.format(
+        input_images_dir=input_images_dir,
+        pred_path=pred_path,
+        model_id=model_id,
+        mineru_backend=config.get("mineru_backend", "pipeline"),
+    )
+    use_rlaunch_wrapper = bool(config.get("use_rlaunch_wrapper", False))
+    if not use_rlaunch_wrapper:
+        return inner_command
+
+    conda_env = str(config.get("infer_conda_env", "")).strip()
+    conda_init = str(config.get("infer_conda_init", "source ~/.bashrc")).strip()
+    if conda_env:
+        wrapped_inner_command = f"{conda_init} && conda activate {conda_env} && {inner_command}"
+    else:
+        wrapped_inner_command = inner_command
+
+    rlaunch_template = str(
+        config.get(
+            "rlaunch_command_template",
+            "rlaunch --memory={rlaunch_memory} --gpu={rlaunch_gpu} --cpu={rlaunch_cpu} "
+            "--charged-group={rlaunch_charged_group} --private-machine=yes "
+            "--namespace={rlaunch_namespace} "
+            "--mount=gpfs://{rlaunch_mount_src}:{rlaunch_mount_dst} "
+            "-- bash -lc '{inner_infer_command_escaped}'",
+        )
+    )
+    return rlaunch_template.format(
+        inner_infer_command=wrapped_inner_command,
+        inner_infer_command_escaped=_escape_single_quotes_for_bash(wrapped_inner_command),
+        rlaunch_memory=config.get("rlaunch_memory", 64000),
+        rlaunch_gpu=config.get("rlaunch_gpu", 2),
+        rlaunch_cpu=config.get("rlaunch_cpu", 32),
+        rlaunch_charged_group=config.get("rlaunch_charged_group", "mineruinfra_gpu"),
+        rlaunch_namespace=config.get("rlaunch_namespace", "ailab-mineruinfra"),
+        rlaunch_mount_src=config.get("rlaunch_mount_src", "gpfs1/mineru2-shared"),
+        rlaunch_mount_dst=config.get("rlaunch_mount_dst", DEFAULT_SHARED_MOUNT_PREFIX),
+    )
+
+
+def _has_prediction_outputs(pred_dir: Path, file_glob: str) -> bool:
+    return any(pred_dir.glob(file_glob))
+
+
 def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
-    output_root = Path(config.get("output_root", "./results/predictions")).resolve()
     input_images_dir = config.get(
         "input_images_dir",
         "/mnt/shared-storage-user/mineru2-shared/quyuan/1.6/images",
     )
     mock_mode = bool(config.get("mock_mode", True))
-    max_retry, retry_note = _enforce_skill_policy(config=config, mock_mode=mock_mode)
+    real_infer_enabled = bool(config.get("real_infer_enabled", False))
+    if real_infer_enabled:
+        mock_mode = False
 
-    output_root.mkdir(parents=True, exist_ok=True)
+    max_retry, retry_note = _enforce_skill_policy(config=config, mock_mode=mock_mode)
+    prediction_file_glob = str(config.get("prediction_file_glob", "**/*.md"))
+    infer_workdir = config.get("mineru_workdir")
 
     for job in jobs:
         if job.status != "ready":
@@ -92,10 +203,12 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
         if retry_note:
             job.notes.append(retry_note)
 
-        model_dir = output_root / _safe_model_dir(job.model_id)
-        model_dir.mkdir(parents=True, exist_ok=True)
-        pred_file = model_dir / "predictions.jsonl"
-        run_meta_file = model_dir / "run_meta.json"
+        model_dir = _resolve_prediction_dir(job=job, config=config, mock_mode=mock_mode)
+        model_dir_path = Path(model_dir)
+        if mock_mode:
+            model_dir_path.mkdir(parents=True, exist_ok=True)
+        pred_file = model_dir_path / "predictions.jsonl"
+        run_meta_file = model_dir_path / "run_meta.json"
 
         attempts = 0
         job.status = "running"
@@ -107,17 +220,32 @@ def run_jobs(jobs: list[EvalJob], config: dict[str, Any]) -> list[EvalJob]:
                 if mock_mode:
                     _write_mock_prediction(pred_file=pred_file, input_dir=input_images_dir, model_id=job.model_id)
                 else:
-                    raise NotImplementedError(
-                        "Set mock_mode=true for MVP, or replace with real vLLM+rlaunch execution."
+                    command = _build_real_infer_command(
+                        config=config,
+                        input_images_dir=input_images_dir,
+                        pred_path=model_dir,
+                        model_id=job.model_id,
                     )
+                    stdout_text, stderr_text = _run_shell_command(command=command, cwd=infer_workdir)
+                    if stdout_text:
+                        job.notes.append("infer_stdout_captured")
+                    if stderr_text:
+                        job.notes.append("infer_stderr_captured")
 
-                if pred_file.exists() and pred_file.stat().st_size > 0:
+                if mock_mode and pred_file.exists() and pred_file.stat().st_size > 0:
                     job.status = "success"
-                    job.pred_path = str(model_dir)
+                    job.pred_path = model_dir
                     job.error = None
                     break
+
+                if not mock_mode and _has_prediction_outputs(model_dir_path, prediction_file_glob):
+                    job.status = "success"
+                    job.pred_path = model_dir
+                    job.error = None
+                    break
+
                 job.error = "empty_output"
-            except (OSError, RuntimeError, ValueError, NotImplementedError) as exc:
+            except (OSError, RuntimeError, ValueError) as exc:
                 job.error = str(exc)
 
             if attempts > max_retry:

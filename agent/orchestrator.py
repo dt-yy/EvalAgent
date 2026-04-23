@@ -31,7 +31,7 @@ def run_pipeline(configs: dict[str, dict[str, Any]]) -> dict[str, Any]:
     jobs = filter_candidates(candidates=candidates, config=eval_cfg)
     jobs_ready_before_run = sum(1 for j in jobs if j.status == "ready")
     jobs = run_jobs(jobs=jobs, config=eval_cfg)
-    results = evaluate_jobs(jobs=jobs, config=leaderboard_cfg)
+    results = evaluate_jobs(jobs=jobs, config={**leaderboard_cfg, **eval_cfg})
     leaderboard_output = update_leaderboard(results=results, config=leaderboard_cfg)
 
     report = {

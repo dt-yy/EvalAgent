@@ -244,3 +244,56 @@ python scripts/run_once.py --config-dir configs
 - `max_retry_hard_cap: 2`：即使误配更大值，也会被 runner 自动夹到 2。
 
 如果你在某次实验想临时放宽规则，建议只改对应配置，不改代码逻辑。
+
+## 14. 跳过发现模块：以 MinerU 真实跑 OmniDocBench
+
+当你希望先做“单模型部署 + 真实评测”而不是自动发现时，使用：
+
+`scripts/run_mineru_omnidocbench.py`
+
+### 14.1 一次性准备配置
+
+在 `configs/eval.yaml` 里确认：
+
+- `model_output_dir_map` 包含 `opendatalab/mineru: mineru`
+- `mock_mode: false`（真实推理时）
+- `real_infer_enabled: true`
+- `real_eval_enabled: true`
+- `use_rlaunch_wrapper: true`（计算节点离线执行）
+- `omnidocbench_ground_truth_path` 指向真实 `OmniDocBench.json`
+
+同时确认 `readme_verified_repos` 包含：
+
+- `opendatalab/mineru`
+- `https://github.com/opendatalab/mineru`
+
+### 14.2 运行部署 + 跑测（单模型）
+
+```bash
+python scripts/run_mineru_omnidocbench.py --config-dir configs --with-setup --real
+```
+
+该命令会执行：
+
+1. 克隆/更新 `MinerU` 与 `OmniDocBench` 仓库；
+2. 执行 `eval.yaml` 中的环境安装命令；
+3. 调用 MinerU CLI 生成预测文件；
+4. 调用 OmniDocBench `pdf_validation.py` 执行评测；
+5. 自动解析 `result/*_metric_result.json`，计算 overall，更新榜单。
+
+### 14.4 rlaunch 参数（默认已按 PJLab 约定）
+
+`eval.yaml` 里已预置以下字段，你只需按实际资源改数值：
+
+- `rlaunch_memory`、`rlaunch_gpu`、`rlaunch_cpu`
+- `rlaunch_charged_group`、`rlaunch_namespace`
+- `rlaunch_mount_src`、`rlaunch_mount_dst`
+- `infer_conda_env`（默认 `vllm-py311`）
+
+如果要临时绕过 rlaunch 在当前机直接跑，把 `use_rlaunch_wrapper` 改为 `false`。
+
+### 14.3 产物位置
+
+- 运行报告：`results/runs/mineru_eval_*.json`
+- 单模型结果：`results/opendatalab__mineru/run_*.json`
+- 榜单：`leaderboard/leaderboard.json`、`leaderboard/leaderboard.md`

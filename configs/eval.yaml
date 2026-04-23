@@ -25,10 +25,56 @@ allow_licenses:
   - BSD-3-Clause
 enforce_readme_gate: true
 readme_verified_repos:
-  - openbmb/minicpm-o
-  - https://github.com/openbmb/minicpm-o
+  - opendatalab/mineru
+  - https://github.com/opendatalab/mineru
 
 # MVP behavior: generate mock predictions first.
-# Replace runner implementation and set to false for real vLLM+rlaunch.
+# Set to false when running real MinerU inference.
 mock_mode: true
+
+# Real inference mode (MinerU CLI).
+real_infer_enabled: false
+mineru_backend: hybrid
+mineru_workdir: null
+infer_command_template: mineru -p "{input_images_dir}" -o "{pred_path}" -b "{mineru_backend}"
+use_rlaunch_wrapper: true
+infer_conda_init: source ~/.bashrc
+infer_conda_env: vllm-py311
+rlaunch_memory: 64000
+rlaunch_gpu: 2
+rlaunch_cpu: 32
+rlaunch_charged_group: mineruinfra_gpu
+rlaunch_namespace: ailab-mineruinfra
+rlaunch_mount_src: gpfs1/mineru2-shared
+rlaunch_mount_dst: /mnt/shared-storage-user/mineru2-shared
+rlaunch_command_template: >-
+  rlaunch --memory={rlaunch_memory} --gpu={rlaunch_gpu} --cpu={rlaunch_cpu}
+  --charged-group={rlaunch_charged_group} --private-machine=yes
+  --namespace={rlaunch_namespace}
+  --mount=gpfs://{rlaunch_mount_src}:{rlaunch_mount_dst}
+  -- bash -lc '{inner_infer_command_escaped}'
+prediction_file_glob: "**/*.md"
+model_output_dir_map:
+  opendatalab/mineru: mineru
+
+# Real OmniDocBench evaluation mode.
+real_eval_enabled: false
+omnidocbench_repo_dir: /mnt/shared-storage-user/mineru2-shared/quyuan/OmniDocBench
+omnidocbench_config_template: /mnt/shared-storage-user/mineru2-shared/quyuan/OmniDocBench/configs/end2end.yaml
+omnidocbench_generated_config_dir: /mnt/shared-storage-user/mineru2-shared/quyuan/OmniDocBench/configs/generated
+omnidocbench_ground_truth_path: /mnt/shared-storage-user/mineru2-shared/quyuan/OmniDocBench/OmniDocBench.json
+omnidocbench_ground_truth_page_info: ""
+omnidocbench_match_method: quick_match
+omnidocbench_python_bin: python
+omnidocbench_eval_command_template: '{python_bin} pdf_validation.py --config "{config_path}"'
+
+# Optional one-click setup commands for manual script.
+mineru_repo_url: https://github.com/opendatalab/MinerU.git
+mineru_repo_dir: /mnt/shared-storage-user/mineru2-shared/quyuan/MinerU
+omnidocbench_repo_url: https://github.com/opendatalab/OmniDocBench.git
+setup_auto_pull_repo: true
+mineru_setup_commands:
+  - uv pip install -U "mineru[all]"
+omnidocbench_setup_commands:
+  - pip install -r requirements.txt
 

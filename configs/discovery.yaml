@@ -10,6 +10,12 @@ max_per_keyword: 10
 
 # Fallback when GitHub API is unavailable.
 seed_repos:
+  - model_id: opendatalab/mineru
+    repo_url: https://github.com/opendatalab/MinerU
+    ref: master
+    stars: 60000
+    license_spdx: Apache-2.0
+    summary: MinerU document parsing baseline.
   - model_id: OpenBMB/MiniCPM-o-2_6
     repo_url: https://github.com/OpenBMB/MiniCPM-o
     ref: main
